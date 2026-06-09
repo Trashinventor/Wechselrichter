@@ -1,3 +1,9 @@
+//**************************************************************************************************
+//GaN-Wechselrichter Source-Code
+//by Moritz Rambold 2026
+//thetrashinventor.de
+//**************************************************************************************************
+
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
