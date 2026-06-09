@@ -188,10 +188,10 @@ void setup() {
   pinMode(ENCODER_SW, INPUT_PULLUP);
 
   // BUTTONS
-  pinMode(BUTTON_UP, INPUT_PULLUP);
-  pinMode(BUTTON_DOWN, INPUT_PULLUP);
-  pinMode(BUTTON_LEFT, INPUT_PULLUP);
-  pinMode(BUTTON_RIGHT, INPUT_PULLUP);
+  pinMode(BUTTON_UP, INPUT);
+  pinMode(BUTTON_DOWN, INPUT);
+  pinMode(BUTTON_LEFT, INPUT);
+  pinMode(BUTTON_RIGHT, INPUT);
   
   //Create 3-Phase SPWM-Generator Task on core 1
   xTaskCreatePinnedToCore(Generate_SPWM, "3-SPWM-Generator", 10000, NULL, 1, &SPWM_GEN, 1);
