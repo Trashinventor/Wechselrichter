@@ -1,8 +1,7 @@
 # GaN-FET-Wechselrichter Bachlorarbeit
 ESP32-Sourcecode für den GaN-Wechselrichter für Bachlorarbeit.
-Notizen zum Überblick.
-Getestet mit Testaufbau des gesamten Mikrocontroller-Teils auf Lochraster.
-
+Getestet mit Platine.
+Source-Code mit neuer MCPWM-Lib version
 
 ## Features
 - 3-phasige SPWM-Generierung per ESP32-MCU
