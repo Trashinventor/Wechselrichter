@@ -2,6 +2,7 @@
 // GaN-Wechselrichter Source-Code
 // by Moritz Rambold 2026
 // thetrashinventor.de
+// Version 4
 //******************************************************************************************************
 
 #include <SPI.h>
@@ -42,8 +43,8 @@ Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, 
 #define BUTTON_RIGHT 33
 
 #define ENCODER_SW 27
-#define ENCODER_A 26
-#define ENCODER_B 25
+#define ENCODER_A 25  //falls encoder verkehrte Drehrichtung hat -> ENCODER_A und ENCODER_B tauschen!
+#define ENCODER_B 26
 
 #define I1_PIN 2
 #define I2_PIN 4
@@ -57,7 +58,7 @@ float I2 = 0;                 //Stromsensor V -> W
 int contrast = 255;           //Display-Kontrast
 float core0 = 0.0;            //Kern-Auslastung Kern 0 in %
 float core1 = 0.0;  	        //Kern-Auslastung Kern 1 in %
-
+uint32_t aussteuergrad = 100;      //Aussteuergrad
 // MCPWM PRELUDE
 // Timer resolution 10 MHz / 100 kHz = 100 timer ticks per PWM period
 #define MCPWM_RESOLUTION_HZ 10000000UL
@@ -106,9 +107,10 @@ struct MenuPage {
 MenuItem homeItems[] = {
   { "f-PWM", &PWM_FREQ, TYPE_UINT32, "Hz", true, false, 0 },
   { "f-SIN", &SINE_FREQ, TYPE_UINT32, "Hz", true, false, 0 },
+  {"Ausst.", &aussteuergrad, TYPE_UINT32, "%", true, false, 0},
   { "I1", &I1, TYPE_FLOAT, "A", false, false, 0 },
-  { "I2", &I2, TYPE_FLOAT, "A", false, false, 0 },
-  { "SETTINGS", nullptr, TYPE_INT, "", true, true, 1 }
+  { "I2", &I2, TYPE_FLOAT, "A", false, false, 0 }
+  //{ "SETTINGS", nullptr, TYPE_INT, "", true, true, 1 }
 };
 
 //Settingspage
@@ -121,8 +123,8 @@ MenuItem settingsItems[] = {
 
 //Pages
 MenuPage pages[] = {
-  { "HOME", homeItems, 5 },
-  { "SETTINGS", settingsItems, 4 }
+  { "HOME", homeItems, 5 }
+  //{ "SETTINGS", settingsItems, 4 }
 };
 
 // STATE
@@ -251,9 +253,13 @@ void setup() {
 void loop() {}
 
 // SINE LOOKUP TABLE
-void init_sin_table(){
+void init_sin_table() {
   for (int i = 0; i < TABLE_SIZE; i++) {
-    sin_table[i] = (sinf(2.0f * M_PI * i / TABLE_SIZE)+ 1.0f) * 50.0f;
+    float sine = sinf(2.0f * M_PI * i / TABLE_SIZE);
+
+    // Sinus auf 0...100 % Duty abbilden
+    // und anschließend mit dem Aussteuergrad skalieren
+    sin_table[i] = 50.0f + (sine * 50.0f * aussteuergrad / 100.0f);
   }
 }
 
@@ -387,7 +393,7 @@ void Generate_SPWM(void* pvParameters) {
       uint16_t phase_w = (index + (2 * TABLE_SIZE / 3)) % TABLE_SIZE;
 
       //Get Duty from sinetable
-      float duty_u = sin_table[phase_u];
+      float duty_u = sin_table[phase_u];//hier Aussteuerungsgrad
       float duty_v = sin_table[phase_v];
       float duty_w = sin_table[phase_w];
 
@@ -507,7 +513,11 @@ void changeValue(MenuItem& item, int dir){
         if (v == &PWM_FREQ) {
           update_mcpwm_frequency();
         }
-
+        //Aussteuergrad
+        if (v == &aussteuergrad) {
+            *v = constrain(*v, 0U, 100U);//Aussteuergrad auf 0-100% limitiert
+          init_sin_table();
+        }
         break;
       }
 
