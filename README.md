@@ -1,6 +1,8 @@
 # GaN-HEMT-Wechselrichter -- Bachlorarbeit
 ESP32-Sourcecode für den 3-phasigen GaN-Wechselrichter.
 
+ACHTUNG: Stromwerte auf Display falsch!
+
 ## Features
 - 3-phasige SPWM-Generierung mit einstellbaren Parametern
 - FreeRTOS auf 2 Kernen
