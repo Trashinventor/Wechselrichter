@@ -2,8 +2,14 @@
 // GaN-Wechselrichter Source-Code
 // by Moritz Rambold 2026
 // thetrashinventor.de
-// Version 4
+// Version 5
 //******************************************************************************************************
+//ISSUES:
+// - Filtering of ADC
+// - Sampling of ADC
+// - RMS-calculation
+// - I1 layouted on GPIO2 (strapping pin) -> values wrong. needs fixing in hardware
+//------------------------------------------------------------------------------------------------------
 
 #include <SPI.h>
 #include <Adafruit_GFX.h>
@@ -45,15 +51,15 @@ Adafruit_SH1106G display =  Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire,
 #define ENCODER_A 25
 #define ENCODER_B 26
 
-#define I1_PIN 2
+#define I1_PIN 2  //GPIO2 IS STRAPPING PIN -> DON'T USE. 
 #define I2_PIN 4
 
 // Variables
 uint32_t sin_table[TABLE_SIZE];
-volatile uint32_t PWM_FREQ = 100000;
-volatile uint32_t SINE_FREQ = 50;
-volatile float I1 = 0;
-volatile float I2 = 0;
+volatile uint32_t PWM_FREQ = 100000;  //PWM-Frequency at start
+volatile uint32_t SINE_FREQ = 50;     //Sine-Frequency at start
+float I1 = 0;
+float I2 = 0;
 volatile uint32_t aussteuergrad = 100;
 
 // MCPWM
@@ -74,23 +80,23 @@ mcpwm_gen_handle_t mcpwm_gen_w = NULL;
 volatile uint32_t mcpwm_period_ticks = 0; // Current MCPWM period in timer ticks
 volatile uint32_t spwmPhaseAccumulator = 0; // Hardware SPWM phase accumulator
 
-// Menu types
+// Menu types (needed for correct formating on display)
 enum VarType{TYPE_UINT32, TYPE_INT, TYPE_FLOAT};
 
 struct MenuItem {
-  const char* label;
-  void* variable;
-  VarType type;
-  const char* unit;
-  bool selectable;
-  bool isPageSwitch;
-  uint8_t targetPage;
+  const char* label;  //Displayed Name
+  void* variable;     //variable
+  VarType type;       //type of variable
+  const char* unit;   //displayed unit e.g. "Hz"
+  bool selectable;    //true = can be selected for changing variable
+  bool isPageSwitch;  //true = can switch to page when selected
+  uint8_t targetPage; //page to be switched to
 };
 
 struct MenuPage {
-  const char* header;
-  MenuItem* items;
-  uint8_t itemCount;
+  const char* header; //Menupage Header
+  MenuItem* items;    //pointer to defined Page-struct
+  uint8_t itemCount;  //amount of items on the page
 };
 
 // Homepage
@@ -98,13 +104,12 @@ MenuItem homeItems[] = {
   {"f-PWM", (void*)&PWM_FREQ, TYPE_UINT32, "Hz", true, false, 0},
   {"f-SIN", (void*)&SINE_FREQ, TYPE_UINT32, "Hz", true, false, 0},
   {"Ausst.", (void*)&aussteuergrad, TYPE_UINT32, "%", true, false, 0},
-  {"I1", (void*)&I1, TYPE_FLOAT, "A", false, false, 0},
   {"I2", (void*)&I2, TYPE_FLOAT, "A", false, false, 0}
 };
 
 // Pages
 MenuPage pages[] = {
-  {"HOME", homeItems, 5}
+  {"HOME", homeItems, 4}
 };
 
 // States
@@ -143,6 +148,7 @@ void activateItem();                                //Menusystem: Display activa
 void draw();                                        //Menusystem: Rendering of Menu
 void updateMenu();                                  //Menusystem: Update Menu 
 void update_mcpwm_frequency();                      //Reinitialize 3-Phase-SPWM when carrierfrequency changed via menu
+float clarkTransform(float, float);
 
 // Hardware MCPWM callback
 static bool IRAM_ATTR mcpwm_timer_on_empty(
@@ -150,7 +156,7 @@ static bool IRAM_ATTR mcpwm_timer_on_empty(
   const mcpwm_timer_event_data_t* edata,
   void* user_data);
 
-// 'HS_logo', 64x64px
+//Logo of HAW-Landshut, 64x64px
 static const unsigned char PROGMEM HS_logo[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xff, 0xff, 0xfc, 0x07, 0xff, 0xfe,
   0x7f, 0xff, 0xff, 0xff, 0xfc, 0x07, 0xff, 0xfe, 0x7f, 0xff, 0xff, 0xff, 0xfc, 0x07, 0xff, 0xfe,
@@ -199,19 +205,19 @@ void setup() {
   pinMode(BUTTON_DOWN, INPUT);
   pinMode(BUTTON_LEFT, INPUT);
   pinMode(BUTTON_RIGHT, INPUT);
-  pinMode(I1_PIN, INPUT);
+  pinMode(I1_PIN, INPUT);  
   pinMode(I2_PIN, INPUT);
 
   init_sin_table();
   init_mcpwm();
-  analogReadResolution(12);
-  analogSetAttenuation(ADC_11db);
+  analogReadResolution(12); //Set ADC to the max. 12-Bit-resolution
+  analogSetAttenuation(ADC_11db); //set ADC-resolution to 0-3.3V
   lastA = digitalRead(ENCODER_A);
   attachInterrupt(digitalPinToInterrupt(ENCODER_A), encoderISR, CHANGE);
   
   Wire.begin(OLED_SDA, OLED_SCL);
   SetupDisplay();
-  xTaskCreatePinnedToCore(UserInterface, "UI-Task", 16000, NULL, 1, &UI, 0);
+  xTaskCreatePinnedToCore(UserInterface, "UI-Task", 16000, NULL, 1, &UI, 0); //Create task for UI on core 0
 }
 
 void loop() {}
@@ -348,9 +354,6 @@ static bool IRAM_ATTR mcpwm_timer_on_empty(
   uint32_t period = mcpwm_period_ticks;
   if(pwmFreq == 0 || period < 2){return false;}  // Safety
 
-
-
-  //****************************************************************************************************
   // Calculate phase increment (phaseIncrement = (SINE_FREQ/PWMFREQU) * 2^32)
   uint32_t phaseIncrement = (uint32_t)(((uint64_t)sineFreq << 32)/ pwmFreq);
 
@@ -393,8 +396,11 @@ static bool IRAM_ATTR mcpwm_timer_on_empty(
 // UI Task
 void UserInterface(void* pvParameters){
   while(1){
-    I1 = GetCurrent(I1_PIN);
+    //I1 = GetCurrent(I1_PIN);
     I2 = GetCurrent(I2_PIN);
+    Serial.println("------------");
+    //Serial.println(I1);
+    Serial.println(I2);
     updateMenu();
     vTaskDelay(pdMS_TO_TICKS(50));    // UI refresh interval
   }
@@ -414,15 +420,14 @@ void SetupDisplay() {
 }
 
 // Measure Current
-float GetCurrent(int pin){
-  int adc = analogRead(pin);
-  float v = (adc / 4095.0f)* 3.3f;
-  // Needs correct sampling + RMS calculation
-  //
-  // 1.646 V = 0 A
-  // 0.327 V = -50 A
-  // 2.946 V = +50 A
-  return (v - 1.646f) * (50.0f / (2.946f - 1.646f));
+float GetCurrent(int pin) {
+    int adc = analogReadMilliVolts(pin);
+    float voltage = (float)adc/1000.0f;
+    float i = ((voltage - (91.0f / 276.0f)) /(91.0f / 3450.0f)) - 50.0f;
+    Serial.println(voltage, 6);
+    Serial.println(adc);
+
+    return i;
 }
 
 // Encoder ISR
@@ -478,7 +483,7 @@ void changeValue(MenuItem& item, int dir){
         // No MCPWM restart necessary.
       }
 
-        // Modulation
+      // Modulation
       if(v == (uint32_t*)&aussteuergrad){
         *v = constrain(*v, 0U, 100U);
         init_sin_table();
